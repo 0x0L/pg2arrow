@@ -87,8 +87,8 @@ int main(int argc, char **argv) {
     auto table = arrow::Table::FromRecordBatches({batch}).ValueOrDie();
 
     std::shared_ptr<arrow::io::FileOutputStream> outfile;
-    PARQUET_ASSIGN_OR_THROW(outfile,
-                            arrow::io::FileOutputStream::Open("test1.parquet"));
+    PARQUET_ASSIGN_OR_THROW(
+        outfile, arrow::io::FileOutputStream::Open("output.parquet"));
 
     PARQUET_THROW_NOT_OK(parquet::arrow::WriteTable(
         *table, arrow::default_memory_pool(), outfile, table->num_rows()));
