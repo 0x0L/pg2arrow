@@ -80,21 +80,30 @@ async def build_tree(conn, table):
 
 
 _type_map = {
-    "timestamp": pa.timestamp("us"),
-    "timestamptz": pa.timestamp("us", tz="utc"),
+    "bool": pa.bool_(),
     "bpchar": pa.utf8(),
-    "varchar": pa.utf8(),
-    "text": pa.utf8(),
     "bytea": pa.binary(),
-    "boolean": pa.bool_(),
-    "int2": pa.int16(),
-    "serial2": pa.int16(),
-    "int4": pa.int32(),
-    "serial4": pa.int32(),
-    "int8": pa.int64(),
-    "serial8": pa.int64(),
+    "date": pa.date32(),
     "float4": pa.float32(),
     "float8": pa.float64(),
+    "int2": pa.int16(),
+    "int4": pa.int32(),
+    "int8": pa.int64(),
+    "interval": pa.duration("us"),
+    "json": pa.utf8(),
+    "jsonb": pa.binary(),
+    # "numeric": pa.decimal128()
+    "serial2": pa.int16(),
+    "serial4": pa.int32(),
+    "serial8": pa.int64(),
+    "text": pa.utf8(),
+    "time": pa.time64("us"),
+    # "timetz": pa.time64("us"),
+    "timestamp": pa.timestamp("us"),
+    "timestamptz": pa.timestamp("us", tz="utc"),
+    "uuid": pa.binary(length=16),
+    "varchar": pa.utf8(),
+    "xml": pa.utf8(),
 }
 
 

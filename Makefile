@@ -1,6 +1,6 @@
-CXX=g++
+CXX=c++
 RM=rm -f
-CPPFLAGS=-O3 -std=c++11
+CPPFLAGS=-O3 -std=c++11 -Wall
 LDLIBS=-larrow -lparquet -lpq
 
 SRCS=main.cc pg2arrow.cc

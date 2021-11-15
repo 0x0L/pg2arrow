@@ -5,7 +5,7 @@
 
 #if defined(__linux__) || defined(__CYGWIN__)
 #include <endian.h>
-#elif defined(__NetBSD__) || defined(__FreeBSD__) || defined(__OpenBSD__) ||   \
+#elif defined(__NetBSD__) || defined(__FreeBSD__) || defined(__OpenBSD__) || \
     defined(__DragonFly__)
 #include <sys/endian.h>
 #elif defined(__APPLE__)
@@ -42,8 +42,7 @@
 #define __BIG_ENDIAN BIG_ENDIAN
 #endif
 
-#if !defined(__BYTE_ORDER) || !defined(__LITTLE_ENDIAN) ||                     \
-    !defined(__BIG_ENDIAN)
+#if !defined(__BYTE_ORDER) || !defined(__LITTLE_ENDIAN) || !defined(__BIG_ENDIAN)
 #error Cannot determine platform byte order.
 #endif
 
@@ -66,19 +65,17 @@ static inline uint16_t apg_bswap16(uint16_t) {
 }
 
 static inline uint32_t apg_bswap32(uint32_t x) {
-    return (((x << 24) & 0xff000000) | ((x << 8) & 0x00ff0000) |
-            ((x >> 8) & 0x0000ff00) | ((x >> 24) & 0x000000ff));
+    return (
+        ((x << 24) & 0xff000000) | ((x << 8) & 0x00ff0000) | ((x >> 8) & 0x0000ff00) |
+        ((x >> 24) & 0x000000ff));
 }
 
 static inline uint64_t apg_bswap64(uint64_t x) {
-    return (((x << 56) & 0xff00000000000000ULL) |
-                ((x << 40) & 0x00ff000000000000ULL) |
-                ((x << 24) & 0x0000ff0000000000ULL) |
-                ((x << 8) & 0x000000ff00000000ULL) |
-                ((x >> 8) & 0x00000000ff000000ULL) |
-                ((x >> 24) & 0x0000000000ff0000ULL) |
-                ((x >> 40) & 0x000000000000ff00ULL) |
-                ((x >> 56) & 0x00000000000000ffULL););
+    return (
+        ((x << 56) & 0xff00000000000000ULL) | ((x << 40) & 0x00ff000000000000ULL) |
+            ((x << 24) & 0x0000ff0000000000ULL) | ((x << 8) & 0x000000ff00000000ULL) |
+            ((x >> 8) & 0x00000000ff000000ULL) | ((x >> 24) & 0x0000000000ff0000ULL) |
+            ((x >> 40) & 0x000000000000ff00ULL) | ((x >> 56) & 0x00000000000000ffULL););
 }
 
 #endif
@@ -109,7 +106,7 @@ static inline uint64_t apg_bswap64(uint64_t x) {
 
 #endif
 
-static inline void pack_int16(char *buf, int16_t x) {
+static inline void pack_int16(char* buf, int16_t x) {
     uint16_t nx = apg_hton16((uint16_t)x);
     /* NOTE: the memcpy below is _important_ to support systems
        which disallow unaligned access.  On systems, which do
@@ -119,43 +116,43 @@ static inline void pack_int16(char *buf, int16_t x) {
     memcpy(buf, &nx, sizeof(uint16_t));
 }
 
-static inline void pack_int32(char *buf, int64_t x) {
+static inline void pack_int32(char* buf, int64_t x) {
     uint32_t nx = apg_hton32((uint32_t)x);
     memcpy(buf, &nx, sizeof(uint32_t));
 }
 
-static inline void pack_int64(char *buf, int64_t x) {
+static inline void pack_int64(char* buf, int64_t x) {
     uint64_t nx = apg_hton64((uint64_t)x);
     memcpy(buf, &nx, sizeof(uint64_t));
 }
 
-static inline uint16_t unpack_uint16(const char *buf) {
+static inline uint16_t unpack_uint16(const char* buf) {
     uint16_t nx;
-    memcpy((char *)&nx, buf, sizeof(uint16_t));
+    memcpy((char*)&nx, buf, sizeof(uint16_t));
     return apg_ntoh16(nx);
 }
 
-static inline int16_t unpack_int16(const char *buf) {
+static inline int16_t unpack_int16(const char* buf) {
     return (int16_t)unpack_uint16(buf);
 }
 
-static inline uint32_t unpack_uint32(const char *buf) {
+static inline uint32_t unpack_uint32(const char* buf) {
     uint32_t nx;
-    memcpy((char *)&nx, buf, sizeof(uint32_t));
+    memcpy((char*)&nx, buf, sizeof(uint32_t));
     return apg_ntoh32(nx);
 }
 
-static inline int32_t unpack_int32(const char *buf) {
+static inline int32_t unpack_int32(const char* buf) {
     return (int32_t)unpack_uint32(buf);
 }
 
-static inline uint64_t unpack_uint64(const char *buf) {
+static inline uint64_t unpack_uint64(const char* buf) {
     uint64_t nx;
-    memcpy((char *)&nx, buf, sizeof(uint64_t));
+    memcpy((char*)&nx, buf, sizeof(uint64_t));
     return apg_ntoh64(nx);
 }
 
-static inline int64_t unpack_int64(const char *buf) {
+static inline int64_t unpack_int64(const char* buf) {
     return (int64_t)unpack_uint64(buf);
 }
 
@@ -169,25 +166,25 @@ union _apg_doubleconv {
     double f;
 };
 
-static inline void pack_float(char *buf, float f) {
+static inline void pack_float(char* buf, float f) {
     union _apg_floatconv v;
     v.f = f;
     pack_int32(buf, (int32_t)v.i);
 }
 
-static inline void pack_double(char *buf, double f) {
+static inline void pack_double(char* buf, double f) {
     union _apg_doubleconv v;
     v.f = f;
     pack_int64(buf, (int64_t)v.i);
 }
 
-static inline float unpack_float(const char *buf) {
+static inline float unpack_float(const char* buf) {
     union _apg_floatconv v;
     v.i = (uint32_t)unpack_int32(buf);
     return v.f;
 }
 
-static inline double unpack_double(const char *buf) {
+static inline double unpack_double(const char* buf) {
     union _apg_doubleconv v;
     v.i = (uint64_t)unpack_int64(buf);
     return v.f;

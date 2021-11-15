@@ -1,6 +1,8 @@
-BasedOnStyle: llvm
+BasedOnStyle: chromium
 IndentWidth: 4
 
 ---
 Language: Cpp
+ColumnLimit: 88
+AlignAfterOpenBracket: AlwaysBreak
 ...
