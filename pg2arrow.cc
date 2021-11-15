@@ -1,4 +1,5 @@
 #include "./pg2arrow.h"
+
 #include "./hton.h"
 
 using namespace arrow;
@@ -22,6 +23,17 @@ int32_t Time(PgBuilder&, ArrayBuilder* builder, const char* cursor, int32_t) {
     int64_t v = unpack_int64(cursor);
     auto status = CAST(Time64Builder)->Append(v);
     return 8;
+}
+
+int32_t Duration(PgBuilder&, ArrayBuilder* builder, const char* cursor, int32_t) {
+    int64_t msecs = unpack_int64(cursor);
+    int32_t days = unpack_int32(cursor + 8);
+    // int32_t months = unpack_int32(cursor + 12);
+
+    const int64_t kMicrosPerDay = 24 * 3600 * 1000000LL;
+    int64_t v = msecs + days * kMicrosPerDay;
+    auto status = CAST(DurationBuilder)->Append(v);
+    return 16;
 }
 
 int32_t Float(PgBuilder&, ArrayBuilder* builder, const char* cursor, int32_t) {
@@ -57,17 +69,6 @@ int32_t Int64(PgBuilder&, ArrayBuilder* builder, const char* cursor, int32_t) {
     int64_t v = unpack_int64(cursor);
     auto status = CAST(Int64Builder)->Append(v);
     return 8;
-}
-
-int32_t Duration(PgBuilder&, ArrayBuilder* builder, const char* cursor, int32_t) {
-    int64_t msecs = unpack_int64(cursor);
-    int32_t days = unpack_int32(cursor + 8);
-    // int32_t months = unpack_int32(cursor + 12);
-
-    const int64_t kMicrosPerDay = 24 * 3600 * 1000000LL;
-    int64_t v = msecs + days * kMicrosPerDay;
-    auto status = CAST(DurationBuilder)->Append(v);
-    return 16;
 }
 
 int32_t List(PgBuilder& pgb, ArrayBuilder* builder, const char* cursor, int32_t) {
@@ -143,6 +144,8 @@ void InitDecoders(PgBuilder::DecoderMap& decoders, ArrayBuilder* builder) {
         decoders[builder] = Date;
     } else if (CHECK(Time64Builder)) {
         decoders[builder] = Time;
+    } else if (CHECK(DurationBuilder)) {
+        decoders[builder] = Duration;
     } else if (CHECK(FloatBuilder)) {
         decoders[builder] = Float;
     } else if (CHECK(DoubleBuilder)) {
@@ -155,8 +158,6 @@ void InitDecoders(PgBuilder::DecoderMap& decoders, ArrayBuilder* builder) {
         decoders[builder] = Int32;
     } else if (CHECK(Int64Builder)) {
         decoders[builder] = Int64;
-    } else if (CHECK(DurationBuilder)) {
-        decoders[builder] = Duration;
     } else if (CHECK(ListBuilder)) {
         InitDecoders(decoders, CAST(ListBuilder)->value_builder());
         decoders[builder] = List;
