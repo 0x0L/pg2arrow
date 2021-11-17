@@ -18,7 +18,7 @@ Schema can be computed via `tools/dump_schema.py`
 
 * error handling
 
-* some systematic tests would be nice
+* some tests would be nice
 
 ## Type mapping
 
@@ -54,4 +54,3 @@ The following type map is used
 SQL composite types are mapped to Arrow `struct_(...)`
 
 SQL arrays are mapped to Arrow `list_(...)`. Only 1D arrays are fully supported. Higher dimensional arrays will be flattened.
-

@@ -4,191 +4,84 @@
 
 using namespace arrow;
 
-#define CAST(typ) static_cast<typ*>(builder)
-#define CHECK(typ) (dynamic_cast<typ*>(builder) != nullptr)
+namespace Pg2Arrow {
 
-int32_t Timestamp(PgBuilder&, ArrayBuilder* builder, const char* cursor, int32_t) {
-    int64_t v = unpack_int64(cursor) + 946684800000000;
-    auto status = CAST(TimestampBuilder)->Append(v);
-    return 8;
-}
+struct IdMapper {
+    static inline const char* Unpack(const char* x) { return x; }
+};
 
-int32_t Date(PgBuilder&, ArrayBuilder* builder, const char* cursor, int32_t) {
-    int32_t v = unpack_int32(cursor) + 10957;
-    auto status = CAST(Date32Builder)->Append(v);
-    return 4;
-}
+struct TimestampMapper {
+    static const int64_t kEpoch = 946684800000000;  // 2000-01-01 - 1970-01-01 (us)
+    static inline int64_t Unpack(const char* x) { return unpack_int64(x) + kEpoch; }
+};
 
-int32_t Time(PgBuilder&, ArrayBuilder* builder, const char* cursor, int32_t) {
-    int64_t v = unpack_int64(cursor);
-    auto status = CAST(Time64Builder)->Append(v);
-    return 8;
-}
+struct DateMapper {
+    static const int32_t kEpoch = 10957;  // 2000-01-01 - 1970-01-01 (days)
+    static inline int32_t Unpack(const char* x) { return unpack_int32(x) + kEpoch; }
+};
 
-int32_t Duration(PgBuilder&, ArrayBuilder* builder, const char* cursor, int32_t) {
-    int64_t msecs = unpack_int64(cursor);
-    int32_t days = unpack_int32(cursor + 8);
-    // int32_t months = unpack_int32(cursor + 12);
+struct IntervalMapper {
+    static const int64_t kMicrosecondsPerDay = 24 * 3600 * 1000000LL;
+    static inline int64_t Unpack(const char* x) {
+        int64_t msecs = unpack_int64(x);
+        int32_t days = unpack_int32(x + 8);
+        // int32_t months = unpack_int32(cursor + 12);
+        return msecs + days * kMicrosecondsPerDay;
+    }
+};
 
-    const int64_t kMicrosPerDay = 24 * 3600 * 1000000LL;
-    int64_t v = msecs + days * kMicrosPerDay;
-    auto status = CAST(DurationBuilder)->Append(v);
-    return 16;
-}
+struct BoolMapper {
+    static inline bool Unpack(const char* x) { return (*x != 0); }
+};
 
-int32_t Float(PgBuilder&, ArrayBuilder* builder, const char* cursor, int32_t) {
-    float v = unpack_float(cursor);
-    auto status = CAST(FloatBuilder)->Append(v);
-    return 4;
-}
+struct Int16Mapper {
+    static inline int16_t Unpack(const char* x) { return unpack_int16(x); }
+};
 
-int32_t Double(PgBuilder&, ArrayBuilder* builder, const char* cursor, int32_t) {
-    double v = unpack_double(cursor);
-    auto status = CAST(DoubleBuilder)->Append(v);
-    return 8;
-}
+struct Int32Mapper {
+    static inline int64_t Unpack(const char* x) { return unpack_int32(x); }
+};
 
-int32_t Boolean(PgBuilder&, ArrayBuilder* builder, const char* cursor, int32_t) {
-    auto status = CAST(BooleanBuilder)->Append(*cursor != 0);
-    return 1;
-}
+struct Int64Mapper {
+    static inline int64_t Unpack(const char* x) { return unpack_int64(x); }
+};
 
-int32_t Int16(PgBuilder&, ArrayBuilder* builder, const char* cursor, int32_t) {
-    int16_t v = unpack_int16(cursor);
-    auto status = CAST(Int16Builder)->Append(v);
-    return 2;
-}
+struct FloatMapper {
+    static inline float Unpack(const char* x) { return unpack_float(x); }
+};
 
-int32_t Int32(PgBuilder&, ArrayBuilder* builder, const char* cursor, int32_t) {
-    int32_t v = unpack_int32(cursor);
-    auto status = CAST(Int32Builder)->Append(v);
-    return 4;
-}
+struct DoubleMapper {
+    static inline double Unpack(const char* x) { return unpack_double(x); }
+};
 
-int32_t Int64(PgBuilder&, ArrayBuilder* builder, const char* cursor, int32_t) {
-    int64_t v = unpack_int64(cursor);
-    auto status = CAST(Int64Builder)->Append(v);
-    return 8;
-}
+template <typename T, typename F>
+int32_t GenericDecoder(DecoderMap&, ArrayBuilder* builder, const char* cursor) {
+    int32_t flen = unpack_int32(cursor);
+    cursor += 4;
 
-int32_t List(PgBuilder& pgb, ArrayBuilder* builder, const char* cursor, int32_t) {
-    const char* cur = cursor;
-
-    auto list_builder = CAST(ListBuilder);
-    auto status = list_builder->Append();
-
-    int32_t ndims = unpack_int32(cur);
-    cur += 4;
-    // int32_t hasnulls = unpack_int32(cur);
-    cur += 4;
-    // int32_t elem_oid = unpack_int32(cur);
-    cur += 4;
-
-    int32_t total_elem = 1;
-    for (size_t i = 0; i < ndims; i++) {
-        int32_t dim_sz = unpack_int32(cur);
-        cur += 4;
-        // int32_t dim_lb = unpack_int32(cur);
-        cur += 4;
-        total_elem *= dim_sz;
+    if (flen == -1) {
+        if constexpr (
+            std::is_base_of<T, FloatBuilder>::value ||
+            std::is_base_of<T, DoubleBuilder>::value)
+            auto status = ((T*)builder)->Append(NAN);
+        else
+            auto status = builder->AppendNull();
+        return 4;
     }
 
-    auto inner_builder = list_builder->value_builder();
-    for (size_t i = 0; i < total_elem; i++) {
-        cur += pgb.AppendField(inner_builder, cur);
-    }
+    auto value = F::Unpack(cursor);
+    if constexpr (
+        std::is_base_of<T, BinaryBuilder>::value ||
+        std::is_base_of<T, StringBuilder>::value ||
+        std::is_base_of<T, StringDictionaryBuilder>::value)
+        auto status = ((T*)builder)->Append(value, flen);
+    else
+        auto status = ((T*)builder)->Append(value);
 
-    return cur - cursor;
+    return 4 + flen;
 }
 
-int32_t Struct(PgBuilder& pgb, ArrayBuilder* builder, const char* cursor, int32_t) {
-    const char* cur = cursor;
-
-    auto struct_builder = CAST(StructBuilder);
-    auto status = struct_builder->Append();
-
-    int32_t nvalids = unpack_int32(cur);
-    cur += 4;
-
-    int num_fields = struct_builder->num_fields();
-    for (size_t i = 0; i < num_fields; i++) {
-        if (i >= nvalids) {
-            // TODO: check postgres ref code
-            status = struct_builder->field_builder(i)->AppendNull();
-            continue;
-        }
-        // int32_t elem_oid = unpack_int32(cur);
-        cur += 4;
-        cur += pgb.AppendField(struct_builder->field_builder(i), cur);
-    }
-
-    return cur - cursor;
-}
-
-template <typename T>
-int32_t Raw(PgBuilder&, ArrayBuilder* builder, const char* cursor, int32_t flen) {
-    auto status = CAST(T)->Append(cursor, flen);
-    return flen;
-}
-
-template <typename T>
-int32_t Fixed(PgBuilder&, ArrayBuilder* builder, const char* cursor, int32_t flen) {
-    auto status = CAST(T)->Append(cursor);
-    return flen;
-}
-
-void InitDecoders(PgBuilder::DecoderMap& decoders, ArrayBuilder* builder) {
-    if (CHECK(TimestampBuilder)) {
-        decoders[builder] = Timestamp;
-    } else if (CHECK(Date32Builder)) {
-        decoders[builder] = Date;
-    } else if (CHECK(Time64Builder)) {
-        decoders[builder] = Time;
-    } else if (CHECK(DurationBuilder)) {
-        decoders[builder] = Duration;
-    } else if (CHECK(FloatBuilder)) {
-        decoders[builder] = Float;
-    } else if (CHECK(DoubleBuilder)) {
-        decoders[builder] = Double;
-    } else if (CHECK(BooleanBuilder)) {
-        decoders[builder] = Boolean;
-    } else if (CHECK(Int16Builder)) {
-        decoders[builder] = Int16;
-    } else if (CHECK(Int32Builder)) {
-        decoders[builder] = Int32;
-    } else if (CHECK(Int64Builder)) {
-        decoders[builder] = Int64;
-    } else if (CHECK(ListBuilder)) {
-        InitDecoders(decoders, CAST(ListBuilder)->value_builder());
-        decoders[builder] = List;
-    } else if (CHECK(StructBuilder)) {
-        auto builder_ = CAST(StructBuilder);
-        for (size_t i = 0; i < builder_->num_fields(); i++) {
-            InitDecoders(decoders, builder_->field_builder(i));
-        }
-        decoders[builder] = Struct;
-    } else if (CHECK(DictionaryBuilder<StringType>)) {
-        decoders[builder] = Raw<DictionaryBuilder<StringType>>;
-    } else if (CHECK(StringBuilder)) {
-        decoders[builder] = Raw<StringBuilder>;
-    } else if (CHECK(BinaryBuilder)) {
-        decoders[builder] = Raw<BinaryBuilder>;
-    } else if (CHECK(FixedSizeBinaryBuilder)) {
-        decoders[builder] = Fixed<FixedSizeBinaryBuilder>;
-    }
-}
-
-PgBuilder::PgBuilder(std::shared_ptr<Schema> schema) {
-    Status status;
-    auto memory_pool = default_memory_pool();
-    status = RecordBatchBuilder::Make(schema, memory_pool, &builder_);
-
-    for (size_t i = 0; i < builder_->num_fields(); i++) {
-        InitDecoders(decoders_, builder_->GetField(i));
-    }
-}
-
-int32_t PgBuilder::AppendField(ArrayBuilder* builder, const char* cursor) {
+int32_t ListDecoder(DecoderMap& decoders, ArrayBuilder* builder, const char* cursor) {
     int32_t flen = unpack_int32(cursor);
     cursor += 4;
 
@@ -197,11 +90,106 @@ int32_t PgBuilder::AppendField(ArrayBuilder* builder, const char* cursor) {
         return 4;
     }
 
-    decoders_[builder](*this, builder, cursor, flen);
+    int32_t ndims = unpack_int32(cursor);
+    cursor += 4;
+    // int32_t hasnulls = unpack_int32(cursor);
+    cursor += 4;
+    // int32_t elem_oid = unpack_int32(cursor);
+    cursor += 4;
+
+    // Element will be flattened
+    int32_t total_elem = 1;
+    for (size_t i = 0; i < ndims; i++) {
+        int32_t dim_sz = unpack_int32(cursor);
+        cursor += 4;
+        // int32_t dim_lb = unpack_int32(cursor);
+        cursor += 4;
+        total_elem *= dim_sz;
+    }
+
+    auto lbuilder = (ListBuilder*)builder;
+    auto status = lbuilder->Append();
+    auto value_builder = lbuilder->value_builder();
+    auto decoder = decoders[value_builder];
+    for (size_t i = 0; i < total_elem; i++) {
+        cursor += decoder(decoders, value_builder, cursor);
+    }
+
     return 4 + flen;
 }
 
-int32_t PgBuilder::AppendRow(const char* cursor) {
+int32_t StructDecoder(DecoderMap& decoders, ArrayBuilder* builder, const char* cursor) {
+    int32_t flen = unpack_int32(cursor);
+    cursor += 4;
+
+    if (flen == -1) {
+        auto status = builder->AppendNull();
+        return 4;
+    }
+
+    auto sbuilder = (StructBuilder*)builder;
+    auto status = sbuilder->Append();
+
+    int32_t nvalids = unpack_int32(cursor);
+    cursor += 4;
+
+    int num_fields = sbuilder->num_fields();
+    for (size_t i = 0; i < num_fields; i++) {
+        if (i >= nvalids) {
+            // TODO: check postgres ref code
+            status = sbuilder->field_builder(i)->AppendNull();
+            continue;
+        }
+        // int32_t elem_oid = unpack_int32(cursor);
+        cursor += 4;
+
+        auto item_builder = sbuilder->field_builder(i);
+        cursor += decoders[item_builder](decoders, item_builder, cursor);
+    }
+
+    return 4 + flen;
+}
+
+std::map<Type::type, FieldDecoder> gDecoderMap = {
+    {Type::type::BOOL, GenericDecoder<BooleanBuilder, BoolMapper>},
+    {Type::type::INT16, GenericDecoder<Int16Builder, Int16Mapper>},
+    {Type::type::INT32, GenericDecoder<Int32Builder, Int32Mapper>},
+    {Type::type::INT64, GenericDecoder<Int64Builder, Int64Mapper>},
+    {Type::type::FLOAT, GenericDecoder<FloatBuilder, FloatMapper>},
+    {Type::type::DOUBLE, GenericDecoder<DoubleBuilder, DoubleMapper>},
+    {Type::type::STRING, GenericDecoder<StringBuilder, IdMapper>},
+    {Type::type::BINARY, GenericDecoder<BinaryBuilder, IdMapper>},
+    {Type::type::FIXED_SIZE_BINARY, GenericDecoder<FixedSizeBinaryBuilder, IdMapper>},
+    {Type::type::DATE32, GenericDecoder<Date32Builder, DateMapper>},
+    {Type::type::TIMESTAMP, GenericDecoder<TimestampBuilder, TimestampMapper>},
+    {Type::type::TIME64, GenericDecoder<Time64Builder, Int64Mapper>},
+    {Type::type::DURATION, GenericDecoder<DurationBuilder, IntervalMapper>},
+    {Type::type::DICTIONARY, GenericDecoder<StringDictionaryBuilder, IdMapper>},
+    {Type::type::LIST, ListDecoder},
+    {Type::type::STRUCT, StructDecoder}};
+
+void InitDecoders(DecoderMap& decoders, ArrayBuilder* builder) {
+    auto type = builder->type()->id();
+    decoders[builder] = gDecoderMap[type];
+
+    if (type == Type::type::LIST) {
+        InitDecoders(decoders, ((ListBuilder*)builder)->value_builder());
+    } else if (type == Type::type::STRUCT) {
+        auto sbuilder = (StructBuilder*)builder;
+        for (size_t i = 0; i < sbuilder->num_fields(); i++) {
+            InitDecoders(decoders, sbuilder->field_builder(i));
+        }
+    }
+}
+
+PgBuilder::PgBuilder(std::shared_ptr<arrow::Schema> schema) {
+    auto status = RecordBatchBuilder::Make(schema, default_memory_pool(), &builder_);
+    for (size_t i = 0; i < builder_->num_fields(); i++) {
+        InitDecoders(decoders_, builder_->GetField(i));
+    }
+}
+
+int32_t PgBuilder::Append(const char* cursor) {
     const char* cur = cursor;
     int16_t nfields = unpack_int16(cur);
     cur += 2;
@@ -210,13 +198,14 @@ int32_t PgBuilder::AppendRow(const char* cursor) {
         return 2;
 
     for (size_t i = 0; i < nfields; i++) {
-        cur += AppendField(builder_->GetField(i), cur);
+        auto field_builder = builder_->GetField(i);
+        cur += decoders_[field_builder](decoders_, field_builder, cur);
     }
     return cur - cursor;
 }
 
-std::shared_ptr<RecordBatch> PgBuilder::Finish() {
-    std::shared_ptr<RecordBatch> batch;
-    auto status = builder_->Flush(&batch);
-    return batch;
+arrow::Status PgBuilder::Flush(std::shared_ptr<arrow::RecordBatch>* batch) {
+    return builder_->Flush(batch);
 }
+
+}  // namespace Pg2Arrow

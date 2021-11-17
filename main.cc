@@ -3,12 +3,13 @@
 #include <libpq-fe.h>
 #include <parquet/arrow/writer.h>
 
+#include <chrono>
 #include <iostream>
 #include <memory>
 
 #include "./pg2arrow.h"
 
-void CopyTable(PGconn* conn, PgBuilder& builder, const char* table) {
+void CopyTable(PGconn* conn, Pg2Arrow::PgBuilder& builder, const char* table) {
     const int kBinaryHeaderSize = 19;
     PGresult* res;
     int status;
@@ -26,17 +27,27 @@ void CopyTable(PGconn* conn, PgBuilder& builder, const char* table) {
     char* tuple;
     status = PQgetCopyData(conn, &tuple, 0);
     if (status > 0) {
-        builder.AppendRow(tuple + kBinaryHeaderSize);
+        builder.Append(tuple + kBinaryHeaderSize);
         PQfreemem(tuple);
     }
+
+    auto begin = std::chrono::system_clock::now();
+    auto elapsed = begin - begin;
 
     while (true) {
         status = PQgetCopyData(conn, &tuple, 0);
         if (status < 0)
             break;
-        builder.AppendRow(tuple);
+
+        begin = std::chrono::system_clock::now();
+        builder.Append(tuple);
+        elapsed += std::chrono::system_clock::now() - begin;
         PQfreemem(tuple);
     }
+
+    std::cout << "took "
+              << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
+              << " ms" << std::endl;
 
     res = PQgetResult(conn);
     if (PQresultStatus(res) != PGRES_COMMAND_OK)
@@ -96,9 +107,11 @@ int main(int argc, char** argv) {
                   << std::endl;
     PQclear(res);
 
-    PgBuilder builder(schema);
+    Pg2Arrow::PgBuilder builder(schema);
+
     CopyTable(conn, builder, table_name);
-    auto batch = builder.Finish();
+    std::shared_ptr<arrow::RecordBatch> batch;
+    auto r = builder.Flush(&batch);
     auto table = arrow::Table::FromRecordBatches({batch}).ValueOrDie();
 
     std::shared_ptr<arrow::io::FileOutputStream> outfile;

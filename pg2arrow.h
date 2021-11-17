@@ -5,17 +5,22 @@
 #include <map>
 #include <memory>
 
+namespace Pg2Arrow {
+
+class DecoderMap;
+typedef int32_t (*FieldDecoder)(DecoderMap&, arrow::ArrayBuilder*, const char*);
+
+class DecoderMap : public std::map<arrow::ArrayBuilder*, FieldDecoder> {};
+
 class PgBuilder {
    public:
-    using Decoder = int32_t (*)(PgBuilder&, arrow::ArrayBuilder*, const char*, int32_t);
-    using DecoderMap = std::map<arrow::ArrayBuilder*, Decoder>;
-
     PgBuilder(std::shared_ptr<arrow::Schema> schema);
-    int32_t AppendField(arrow::ArrayBuilder* builder, const char* cursor);
-    int32_t AppendRow(const char* cursor);
-    std::shared_ptr<arrow::RecordBatch> Finish();
+    int32_t Append(const char* cursor);
+    arrow::Status Flush(std::shared_ptr<arrow::RecordBatch>* batch);
 
-   private:
-    std::unique_ptr<arrow::RecordBatchBuilder> builder_;
+   protected:
     DecoderMap decoders_;
+    std::unique_ptr<arrow::RecordBatchBuilder> builder_;
 };
+
+};  // namespace Pg2Arrow
