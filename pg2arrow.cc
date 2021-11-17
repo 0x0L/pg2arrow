@@ -185,7 +185,9 @@ void InitDecoders(DecoderMap& decoders, ArrayBuilder* builder) {
 PgBuilder::PgBuilder(std::shared_ptr<arrow::Schema> schema) {
     auto status = RecordBatchBuilder::Make(schema, default_memory_pool(), &builder_);
     for (size_t i = 0; i < builder_->num_fields(); i++) {
-        InitDecoders(decoders_, builder_->GetField(i));
+        auto builder = builder_->GetField(i);
+        InitDecoders(decoders_, builder);
+        field_builders_.push_back({decoders_[builder], builder});
     }
 }
 
@@ -198,8 +200,8 @@ int32_t PgBuilder::Append(const char* cursor) {
         return 2;
 
     for (size_t i = 0; i < nfields; i++) {
-        auto field_builder = builder_->GetField(i);
-        cur += decoders_[field_builder](decoders_, field_builder, cur);
+        auto [decoder, builder] = field_builders_[i];
+        cur += decoder(decoders_, builder, cur);
     }
     return cur - cursor;
 }

@@ -20,6 +20,8 @@ Schema can be computed via `tools/dump_schema.py`
 
 * some tests would be nice
 
+* replace `DecoderMap` by a more efficient container for our use case: int64_t keys (really) with really small number of elements ?
+
 ## Type mapping
 
 Most common base types are supported. `timetz` is not supported.

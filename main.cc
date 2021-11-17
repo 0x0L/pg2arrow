@@ -5,7 +5,6 @@
 
 #include <chrono>
 #include <iostream>
-#include <memory>
 
 #include "./pg2arrow.h"
 
@@ -31,23 +30,23 @@ void CopyTable(PGconn* conn, Pg2Arrow::PgBuilder& builder, const char* table) {
         PQfreemem(tuple);
     }
 
-    auto begin = std::chrono::system_clock::now();
-    auto elapsed = begin - begin;
+    // auto begin = std::chrono::system_clock::now();
+    // auto elapsed = begin - begin;
 
     while (true) {
         status = PQgetCopyData(conn, &tuple, 0);
         if (status < 0)
             break;
 
-        begin = std::chrono::system_clock::now();
+        // begin = std::chrono::system_clock::now();
         builder.Append(tuple);
-        elapsed += std::chrono::system_clock::now() - begin;
+        // elapsed += std::chrono::system_clock::now() - begin;
         PQfreemem(tuple);
     }
 
-    std::cout << "took "
-              << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
-              << " ms" << std::endl;
+    // std::cout << "took "
+    //           << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
+    //           << " ms" << std::endl;
 
     res = PQgetResult(conn);
     if (PQresultStatus(res) != PGRES_COMMAND_OK)
@@ -116,7 +115,7 @@ int main(int argc, char** argv) {
 
     std::shared_ptr<arrow::io::FileOutputStream> outfile;
     PARQUET_ASSIGN_OR_THROW(
-        outfile, arrow::io::FileOutputStream::Open("output.parquet"));
+        outfile, arrow::io::FileOutputStream::Open("/dev/null"));
 
     PARQUET_THROW_NOT_OK(parquet::arrow::WriteTable(
         *table, arrow::default_memory_pool(), outfile, table->num_rows()));
