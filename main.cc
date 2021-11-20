@@ -3,29 +3,199 @@
 #include <libpq-fe.h>
 #include <parquet/arrow/writer.h>
 
+#include <getopt.h>
 #include <chrono>
 #include <iostream>
-
 #include "./pg2arrow.h"
 
-void CopyTable(PGconn* conn, Pg2Arrow::PgBuilder& builder, const char* table) {
-    const int kBinaryHeaderSize = 19;
-    PGresult* res;
-    int status;
+static const char* postgres_dsn = "postgresql://localhost/mytests";
+static const char* table_name = "complex_table";
+static const char* output_filename = "test.parquet";
 
-    auto query = (std::stringstream()
-                  << "COPY (SELECT * FROM " << table << ") TO STDOUT (FORMAT binary);")
-                     .str();
+static void parse_options(int argc, char* const argv[]) {
+    static struct option options[] = {
+        {"dsn", 1, NULL, 'd'},   {"table", 1, NULL, 't'}, {"file", 1, NULL, 'f'},
+        {"help", 0, NULL, 9999}, {NULL, 0, NULL, 0},
+    };
+    int c;
+    while ((c = getopt_long(argc, argv, "d:t:f:", options, NULL)) >= 0) {
+        if (c == 'd')
+            postgres_dsn = optarg;
+        else if (c == 't')
+            table_name = optarg;
+        else if (c == 'f')
+            output_filename = optarg;
+        else {
+            printf("usage: pg2arrow -d dsn -t table -f file");
+        }
+    }
+}
 
-    res = PQexec(conn, query.c_str());
+std::vector<std::tuple<std::string, Oid>> GetCompositeInfo(PGconn* conn, Oid typid) {
+    char query[4096];
+    snprintf(
+        query, sizeof(query), R"(
+        SELECT
+            attnum, attname, atttypid
+        FROM
+            pg_catalog.pg_attribute a,
+            pg_catalog.pg_type t,
+            pg_catalog.pg_namespace n
+        WHERE
+            t.typnamespace = n.oid
+            AND a.atttypid = t.oid
+            AND a.attrelid = %u
+        )",
+        typid);
+
+    auto res = PQexec(conn, query);
+    // auto status = PQresultStatus(res) != PGRES_TUPLES_OK;
+
+    int nfields = PQntuples(res);
+    std::vector<std::tuple<std::string, Oid>> fields(nfields);
+
+    for (size_t i = 0; i < nfields; i++) {
+        int attnum = atoi(PQgetvalue(res, i, 0));
+        const char* attname = PQgetvalue(res, i, 1);
+        Oid atttypid = atooid(PQgetvalue(res, i, 2));
+
+        fields[attnum - 1] = {attname, atttypid};
+    }
+
+    PQclear(res);
+    return fields;
+}
+
+std::map<std::string, std::shared_ptr<arrow::DataType>> kTypeMap = {
+    {"bool", arrow::boolean()},
+    {"bpchar", arrow::utf8()},
+    {"bytea", arrow::binary()},
+    {"date", arrow::date32()},
+    {"float4", arrow::float32()},
+    {"float8", arrow::float64()},
+    {"int2", arrow::int16()},
+    {"int4", arrow::int32()},
+    {"int8", arrow::int64()},
+    {"interval", arrow::duration(arrow::TimeUnit::MICRO)},
+    {"json", arrow::utf8()},
+    {"jsonb", arrow::binary()},
+    // {"numeric", arrow::decimal128(})
+    {"serial2", arrow::int16()},
+    {"serial4", arrow::int32()},
+    {"serial8", arrow::int64()},
+    {"text", arrow::utf8()},
+    {"time", arrow::time64(arrow::TimeUnit::MICRO)},
+    // {"timetz", arrow::time64(arrow::TimeUnit::MICRO)},
+    {"timestamp", arrow::timestamp(arrow::TimeUnit::MICRO)},
+    {"timestamptz", arrow::timestamp(arrow::TimeUnit::MICRO, "utc")},
+    {"uuid", arrow::fixed_size_binary(16)},
+    {"varchar", arrow::utf8()},
+    {"xml", arrow::utf8()}};
+
+std::shared_ptr<arrow::DataType> GetArrowType(PGconn* conn, Oid typid) {
+    char query[4096];
+    snprintf(
+        query, sizeof(query), R"(
+        SELECT
+            typname, typtype, typelem, typrelid
+        FROM
+            pg_catalog.pg_type t,
+            pg_catalog.pg_namespace n
+        WHERE
+            t.typnamespace = n.oid
+            AND t.oid = %u
+        )",
+        typid);
+
+    auto res = PQexec(conn, query);
+    // auto status = PQresultStatus(res) != PGRES_TUPLES_OK;
+
+    std::string typname = PQgetvalue(res, 0, 0);
+    char typtype = *PQgetvalue(res, 0, 1);
+    Oid typelem = atooid(PQgetvalue(res, 0, 2));
+    Oid typrelid = atooid(PQgetvalue(res, 0, 3));
+
+    PQclear(res);
+
+    switch (typtype) {
+        case 'b': {
+            if (typelem > 0) {
+                return arrow::list(GetArrowType(conn, typelem));
+            } else {
+                return kTypeMap[typname];
+            }
+        } break;
+
+        case 'c': {
+            auto fields_info = GetCompositeInfo(conn, typrelid);
+            arrow::FieldVector fields;
+            for (size_t i = 0; i < fields_info.size(); i++) {
+                auto [field_name, field_oid] = fields_info[i];
+                fields.push_back(
+                    arrow::field(field_name, GetArrowType(conn, field_oid)));
+            }
+            return arrow::struct_(fields);
+        } break;
+
+        case 'e': {
+            return arrow::dictionary(arrow::int32(), arrow::utf8());
+        } break;
+    }
+
+    return arrow::null();
+}
+
+std::shared_ptr<arrow::Schema> BuildSchema(PGconn* conn, const char* table) {
+    char query[4096];
+    snprintf(
+        query, sizeof(query), R"(
+        SELECT
+            attnum, attname, atttypid
+        FROM
+            pg_attribute
+        WHERE
+            attrelid = '%s'::regclass
+            AND attnum > 0
+        )",
+        table);
+
+    auto res = PQexec(conn, query);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK)
+        std::cout << "failed on pg_type system catalog query: "
+                  << PQresultErrorMessage(res) << std::endl;
+
+    int nfields = PQntuples(res);
+    arrow::FieldVector fields(nfields);
+
+    for (size_t j = 0; j < nfields; j++) {
+        int attnum = atoi(PQgetvalue(res, j, 0));
+        const char* attname = PQgetvalue(res, j, 1);
+        Oid atttypid = atooid(PQgetvalue(res, j, 2));
+        fields[attnum - 1] = arrow::field(attname, GetArrowType(conn, atttypid));
+    }
+
+    PQclear(res);
+
+    auto schema = arrow::schema(fields);
+    return schema;
+}
+
+void CopyTable(PGconn* conn, const char* table, Pg2Arrow::PgBuilder& builder) {
+    char query[4096];
+    snprintf(
+        query, sizeof(query), "COPY (SELECT * FROM %s) TO STDOUT (FORMAT binary);",
+        table);
+
+    auto res = PQexec(conn, query);
     if (PQresultStatus(res) != PGRES_COPY_OUT)
         std::cout << "error in copy command: " << PQresultErrorMessage(res)
                   << std::endl;
     PQclear(res);
 
     char* tuple;
-    status = PQgetCopyData(conn, &tuple, 0);
+    auto status = PQgetCopyData(conn, &tuple, 0);
     if (status > 0) {
+        const int kBinaryHeaderSize = 19;
         builder.Append(tuple + kBinaryHeaderSize);
         PQfreemem(tuple);
     }
@@ -45,7 +215,8 @@ void CopyTable(PGconn* conn, Pg2Arrow::PgBuilder& builder, const char* table) {
     }
 
     // std::cout << "took "
-    //           << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
+    //           <<
+    //           std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
     //           << " ms" << std::endl;
 
     res = PQgetResult(conn);
@@ -55,67 +226,31 @@ void CopyTable(PGconn* conn, Pg2Arrow::PgBuilder& builder, const char* table) {
 }
 
 int main(int argc, char** argv) {
-    const char* dsn = "postgresql://localhost/mytests";
-    const char* table_name = "minute_bars";
+    parse_options(argc, argv);
 
-    // table minute_bars
-    auto schema = arrow::schema(
-        {arrow::field("timestamp", arrow::timestamp(arrow::TimeUnit::MICRO)),
-         arrow::field("symbol", arrow::int32()), arrow::field("open", arrow::float32()),
-         arrow::field("high", arrow::float32()), arrow::field("low", arrow::float32()),
-         arrow::field("close", arrow::float32()),
-         arrow::field("volume", arrow::int32())});
-
-    // // table complex_types
-    // schema = arrow::schema(
-    //     {arrow::field("t1", arrow::utf8()),
-    //      arrow::field("t2", arrow::list(arrow::float32())),
-    //      arrow::field(
-    //          "t3", arrow::list(arrow::struct_({
-    //                    arrow::field("r", arrow::list(arrow::float32())),
-    //                    arrow::field("i", arrow::float64()),
-    //                }))),
-    //      arrow::field("t4", arrow::dictionary(arrow::int32(), arrow::utf8()))});
-
-    // // table missing_types
-    // schema = arrow::schema({
-    //     arrow::field("bool_col", arrow::boolean()),
-    //     arrow::field("date_col", arrow::date32()),
-    //     arrow::field("time_col", arrow::time64(arrow::TimeUnit::MICRO)),
-    //     // arrow::field("interval_col", arrow::duration(arrow::TimeUnit::MICRO)),
-    //     arrow::field("json_col", arrow::utf8()),
-    //     arrow::field("jsonb_col", arrow::binary()),
-    //     arrow::field("uuid_col", arrow::fixed_size_binary(16)),
-    //     arrow::field("xml_col", arrow::utf8()),
-    //     arrow::field("bytea_col", arrow::binary()),
-    // });
-
-    PGconn* conn;
-    PGresult* res;
-    int status;
-
-    conn = PQconnectdb(dsn);
-    status = PQstatus(conn);
-    if (status != CONNECTION_OK)
+    auto conn = PQconnectdb(postgres_dsn);
+    if (PQstatus(conn) != CONNECTION_OK)
         std::cout << "failed on PostgreSQL connection: " << PQerrorMessage(conn)
                   << std::endl;
 
-    res = PQexec(conn, "BEGIN READ ONLY");
+    auto res = PQexec(conn, "BEGIN READ ONLY");
     if (PQresultStatus(res) != PGRES_COMMAND_OK)
         std::cout << "unable to begin transaction: " << PQresultErrorMessage(res)
                   << std::endl;
     PQclear(res);
 
+    auto schema = BuildSchema(conn, table_name);
     Pg2Arrow::PgBuilder builder(schema);
 
-    CopyTable(conn, builder, table_name);
+    CopyTable(conn, table_name, builder);
+
     std::shared_ptr<arrow::RecordBatch> batch;
-    auto r = builder.Flush(&batch);
+    auto status = builder.Flush(&batch);
     auto table = arrow::Table::FromRecordBatches({batch}).ValueOrDie();
 
     std::shared_ptr<arrow::io::FileOutputStream> outfile;
     PARQUET_ASSIGN_OR_THROW(
-        outfile, arrow::io::FileOutputStream::Open("/dev/null"));
+        outfile, arrow::io::FileOutputStream::Open(output_filename));
 
     PARQUET_THROW_NOT_OK(parquet::arrow::WriteTable(
         *table, arrow::default_memory_pool(), outfile, table->num_rows()));

@@ -2,23 +2,25 @@
 
 pg2arrow is a lightweight tool to parse PostgreSQL binary data into Apache Arrow.
 
-This project is similar to https://github.com/heterodb/pg2arrow though much simpler since we're using the Arrow C++ API.
+This project is similar to https://github.com/heterodb/pg2arrow and is heavily inspired by it. The main differences are the use of `COPY` instead of `FETCH` and that our implementation uses the Arrow C++ API.
 
-Presently connection string, table name and schema are hardcoded in `main.cc`.
+## Usage
 
-Schema can be computed via `tools/dump_schema.py`
+```shell
+usage: pg2arrow -d dsn -t table -f file
+```
 
 ## TODO
 
-* Missing `numeric`, `hstore` decoders
+* Find another name
 
-* C++ implementation of schema builder
+* Missing `numeric`, `hstore` and null (ie skip) decoders
 
 * python bindings
 
 * error handling
 
-* some tests would be nice
+* some tests / benchmarks would be nice
 
 * replace `DecoderMap` by a more efficient container for our use case: int64_t keys (really) with really small number of elements ?
 
