@@ -1,6 +1,7 @@
 #pragma once
 
 #include <arrow/api.h>
+#include <libpq-fe.h>
 
 #include <map>
 
@@ -22,5 +23,9 @@ class PgBuilder {
     std::vector<std::pair<FieldDecoder, arrow::ArrayBuilder*>> field_builders_;
     DecoderMap decoders_;
 };
+
+std::shared_ptr<arrow::Schema> GetQuerySchema(PGconn* conn, const char* query);
+
+void CopyQuery(PGconn* conn, const char* query, PgBuilder& builder);
 
 };  // namespace Pg2Arrow

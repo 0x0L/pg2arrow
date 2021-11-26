@@ -150,6 +150,11 @@ int32_t StructDecoder(DecoderMap& decoders, ArrayBuilder* builder, const char* c
     return 4 + flen;
 }
 
+int32_t NullDecoder(DecoderMap&, ArrayBuilder* builder, const char* cursor) {
+    int32_t flen = unpack_int32(cursor);
+    return flen > 0 ? 4 + flen : 4;
+}
+
 std::map<Type::type, FieldDecoder> gDecoderMap = {
     {Type::type::BOOL, GenericDecoder<BooleanBuilder, BoolMapper>},
     {Type::type::INT16, GenericDecoder<Int16Builder, Int16Mapper>},
@@ -166,7 +171,8 @@ std::map<Type::type, FieldDecoder> gDecoderMap = {
     {Type::type::DURATION, GenericDecoder<DurationBuilder, IntervalMapper>},
     {Type::type::DICTIONARY, GenericDecoder<StringDictionaryBuilder, IdMapper>},
     {Type::type::LIST, ListDecoder},
-    {Type::type::STRUCT, StructDecoder}};
+    {Type::type::STRUCT, StructDecoder},
+    {Type::type::NA, NullDecoder}};
 
 void InitDecoders(DecoderMap& decoders, ArrayBuilder* builder) {
     auto type = builder->type()->id();

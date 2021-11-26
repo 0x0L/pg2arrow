@@ -7,14 +7,21 @@ This project is similar to https://github.com/heterodb/pg2arrow and is heavily i
 ## Usage
 
 ```shell
-usage: pg2arrow -d dsn -t table -f file
+usage: pg2parquet -d conninfo -q query -o output_file
 ```
+
+for instance
+
+```
+pg2parquet -d postgresql://localhost/mytests -q "select * from minute_bars" -o test.parquet
+```
+
 
 ## TODO
 
-* Find another name
+* General design is not too good
 
-* Missing `numeric`, `hstore` and null (ie skip) decoders
+* Missing `numeric`, `hstore` and a few other more esoteric ones
 
 * python bindings
 
@@ -26,9 +33,7 @@ usage: pg2arrow -d dsn -t table -f file
 
 ## Type mapping
 
-Most common base types are supported. `timetz` is not supported.
-
-The following type map is used
+Most common base types are supported. The following type map is used
 
 | PostgreSQL  | Apache Arrow                        |
 |------------:|:------------------------------------|
