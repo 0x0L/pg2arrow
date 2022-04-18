@@ -1,3 +1,4 @@
+# archived, see https://github.com/0x0L/pgeon instead
 # pg2arrow
 
 pg2arrow is a lightweight tool to parse PostgreSQL binary data into Apache Arrow.
